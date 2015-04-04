@@ -3,6 +3,15 @@
     Hardmath123 - 2013
 */
 
+if (typeof String.prototype.endsWith !== 'function') {
+    String.prototype.endsWith = function(suffix) {
+        return this.indexOf(suffix, this.length - suffix.length) !== -1;
+    };
+}
+
+var fs = require("fs");
+var ffmpeg = require("ffmpeg-node");
+
 ! function () {
     // Block libraries
     // Copied from the decompiled Scratch player Flash source
@@ -295,17 +304,10 @@
     ConversionError.prototype.constructor = ConversionError;
 
     function extract_costume(zip, costume) {
-        var f = zip.file(
-            costume.baseLayerID + "." + costume.baseLayerMD5.split(".")[1]
-        ).asUint8Array();
-        var old_str = "";
-        for (var i=0; i<f.length; i++) {
-            old_str += String.fromCharCode(f[i]);
-        }
-        var str = btoa(
-            //String.fromCharCode.apply(null, f)
-            old_str
-        );
+       var file = costume.baseLayerID + "." + costume.baseLayerMD5.split(".")[1];
+
+        var f = zip.file(file).asUint8Array();
+        str = new Buffer(f).toString('base64');
         var ext = costume.baseLayerMD5.split(".")[1];
         ext = ext === "svg" ? "svg+xml" : ext;
         return "data:image/" + ext + ";base64," + str;
@@ -365,18 +367,13 @@
         return result;
     }
 
-    function extract_sound(zip, sound) {
-        var f = zip.file(
-            sound.soundID + "." + sound.md5.split(".")[1]
-        ).asUint8Array();
-        var old_str = "";
-        for (var i=0; i<f.length; i++) {
-            old_str += String.fromCharCode(f[i]);
-        }
-        var str = btoa(
-            //String.fromCharCode.apply(null, f)
-            old_str
-        );
+    function extract_sound(zip, tmpdir, sound) {
+        var file =    tmpdir + "/snapconvert_" + sound.soundID + "." + sound.md5.split(".")[1];
+	var newfile = file + ".new.wav";
+        var buf = fs.readFileSync(newfile);
+        str = buf.toString('base64');
+	fs.unlinkSync(file);
+	fs.unlinkSync(newfile);
         return "data:audio/" + sound.md5.split(".")[1] + ";base64," + str;
     }
 
@@ -445,7 +442,6 @@
                 if (arg === "backdrop #") arg = "costume #";
                 if (["volume", "x position", "y position", "direction", "costume #", "costume name"].indexOf(arg) !== -1) {
                     arg = new XMLData("option", null, arg).toString();
-                    console.log(arg);
                 }
                 mainblk.content.push(new XMLData("l", null, arg));
             } else if (blib.C_INPUTS[proc] && blib.C_INPUTS[proc].indexOf(i) !== -1) {
@@ -512,7 +508,7 @@
         return mainblk;
     }
 
-    function convert_scriptable(data, zip, stage) {
+    function convert_scriptable(data, zip, tmpdir, stage) {
         var result = new XMLData(stage ? "stage" : "sprite");
 
         result.property("name", data["objName"]);
@@ -606,7 +602,7 @@
                 function (child) {
                     if (child["objName"]) {
                         // Sprite
-                        children.content.push(convert_scriptable(child, zip));
+                        children.content.push(convert_scriptable(child, zip, tmpdir));
                     } else {
                         // Watcher
                         var wat = new XMLData("watcher");
@@ -642,7 +638,7 @@
             data["sounds"].forEach(function (snd) {
                 var soundxml = new XMLData("sound");
                 soundxml.property("name", snd["soundName"]);
-                soundxml.property("sound", extract_sound(zip, snd));
+                soundxml.property("sound", extract_sound(zip, tmpdir, snd));
                 soundslist.content.push(
                     new XMLData("item", null, soundxml)
                 );
@@ -660,19 +656,59 @@
         return result;
     }
 
+    copy_and_process_sound = function(file, tmpdir, callback) {
+	var buf = file.asNodeBuffer();
+        var oldfile = tmpdir + '/snapconvert_' + file.name;
+	var newfile = oldfile + '.new.wav';
+	try{
+            fs.unlinkSync(oldfile);
+	} catch(err) {}
+	try{
+            fs.unlinkSync(newfile);
+	} catch(err) {}
+	fs.writeFileSync(oldfile, buf);
+        ffmpeg.exec(
+          ['-i', oldfile, '-acodec',  'pcm_s16le', newfile ],  
+          function () {
+	    callback();
+	  }
+        );
+    }
+
+    prepare_media = function (json_data, zip, tmpdir, callback) {
+	var processed = 0;
+        var should_process = 0;
+	for (var key in zip.files) {
+	    var f = zip.files[key];
+	    if (key.endsWith(".wav")) {	
+		should_process +=1;
+	    }
+	}
+	for (var key in zip.files) {
+	    var f = zip.files[key];
+	    if (key.endsWith(".wav")) {	
+		copy_and_process_sound(f, tmpdir, function() {
+		    processed += 1;		
+		    if(processed == should_process) {
+			callback();
+		    }
+		});
+	    }
+	}
+    };
     // Actual exported function
-    window.Snapin8r = function (zip, name) {
+    Snapin8r = function (zip, name, tmpdir, callback) {
         // Convert a zip object output by JSZip into an XML string for Snap!.
         if (!zip.file("project.json")) {
-            throw new ConversionError("project.json does not exist.");
+            callback(false, "project.json does not exist.", "");
+	    return;
         }
         var json_data = zip.file("project.json").asText();
         try {
             json_data = JSON.parse(json_data);
         } catch (SyntaxError) {
-            throw new ConversionError(
-                "Corrupted project.json (JSON parse error)"
-            );
+	    callback(false, "Corrrupted project.json (JSON parse error)", "");
+            return;
         }
         var result = new XMLData("project");
         result.property("name", name||"Untitled");
@@ -687,50 +723,15 @@
             varks = convert_variables(json_data);
         }
         result.content.push(varks);
-
-        result.content.push(convert_scriptable(json_data, zip, true));
-        return result.toString();
+	prepare_media(json_data, zip, tmpdir, function() {
+           result.content.push(convert_scriptable(json_data, zip, tmpdir, true));
+           callback(true, "", result.toString());
+	});
     };
 
     // Exports:
-    window.Snapin8r.blib = blib;
-    window.Snapin8r.XMLData = XMLData;
-    window.Snapin8r.ConversionError = ConversionError;
+    Snapin8r.blib = blib;
+    Snapin8r.XMLData = XMLData;
+    Snapin8r.ConversionError = ConversionError;
 }();
 
-if (window.IDE_Morph) { // I'm on Snap!--make some modifications
-    IDE_Morph.prototype.droppedBinary = function (anArrayBuffer, name) {
-        // dynamically load ypr->Snap!
-        var ypr = document.getElementById('ypr'),
-            myself = this,
-            suffix = name.substring(name.length - 3);
-
-        // @n I'm messing with your code
-        if (suffix.toLowerCase() !== 'ypr') {
-            // It's a ZIP. sb2 or zip.
-            var zip = new JSZip(anArrayBuffer);
-            myself.droppedText(Snapin8r(zip));
-
-            return;
-        }
-        
-        function loadYPR (buffer, lbl) {
-            var reader = new sb.Reader(),
-                pname = lbl.split('.')[0]; // up to period
-            reader.onload = function (info) {
-                myself.droppedText(new sb.XMLWriter().write(pname, info));
-            };
-            reader.readYPR(new Uint8Array(buffer));
-        }
-
-        if (!ypr) {
-            ypr = document.createElement('script');
-            ypr.id = 'ypr';
-            ypr.onload = function () {loadYPR(anArrayBuffer, name); };
-            document.head.appendChild(ypr);
-            ypr.src = 'ypr.js';
-        } else {
-            loadYPR(anArrayBuffer, name);
-        }
-    };
-}
