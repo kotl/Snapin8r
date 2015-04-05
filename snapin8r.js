@@ -516,7 +516,7 @@ var ffmpeg = require("ffmpeg-node");
             result.property("tempo", data["tempoBPM"]);
         }
 	if (data["info"]) {
-	    console.log("/projects/" + data["info"].projectID + "/");
+	    console.log("/projects/" + data["info"].projectID);
         }
 
         if (stage) {
