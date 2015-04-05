@@ -4,7 +4,7 @@ var fs = require("fs");
 require("./snapin8r.js");
 
 if (process.argv.length != 5) {
-    console.log("Usage: node console.js inputfile outputfile tmpdir");
+    console.log("Usage: node convert.js inputfile outputfile tmpdir");
 } else {
 fs.readFile(process.argv[2], function(err, data) {
     var zip = new JSZip();

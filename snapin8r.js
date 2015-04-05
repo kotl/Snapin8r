@@ -72,7 +72,7 @@ var ffmpeg = require("ffmpeg-node");
             "noteOn:duration:elapsed:from:": "doPlayNote",
             //	"instrument:":"",
             //	"changeVolumeBy:":"",
-            //	"setVolumeTo:":"",
+            // "setVolumeTo:":"",
             //	"volume":"",
             "changeTempoBy:": "doChangeTempo",
             "setTempoTo:": "doSetTempo",
@@ -372,8 +372,6 @@ var ffmpeg = require("ffmpeg-node");
 	var newfile = file + ".new.wav";
         var buf = fs.readFileSync(newfile);
         str = buf.toString('base64');
-	fs.unlinkSync(file);
-	fs.unlinkSync(newfile);
         return "data:audio/" + sound.md5.split(".")[1] + ";base64," + str;
     }
 
@@ -419,7 +417,8 @@ var ffmpeg = require("ffmpeg-node");
         } else {
             mainblk = new XMLData("block");
             mainblk.property("s", blib.BLOCK_LIBRARY[proc] || !function() {
-                throw new ConversionError("Unknown spec "+proc);
+		console.log("Error processing:" + proc +", obj:" + objName);
+                // throw new ConversionError("Error unkown spec:" + proc);
             }());
             args = blk.slice(1);
         }
@@ -515,6 +514,9 @@ var ffmpeg = require("ffmpeg-node");
         result.property("costume", data["currentCostumeIndex"] + 1);
         if (data["tempoBPM"]) {
             result.property("tempo", data["tempoBPM"]);
+        }
+	if (data["info"]) {
+	    console.log("/projects/" + data["info"].projectID + "/");
         }
 
         if (stage) {
@@ -656,16 +658,22 @@ var ffmpeg = require("ffmpeg-node");
         return result;
     }
 
+    delfile= function(file) {
+	try{
+            fs.unlinkSync(file);
+	} catch(err) {
+	    if(err.code != 'ENOENT') {
+		    console.log(err);
+	        process.exit(3);
+	    }
+	}
+    }
     copy_and_process_sound = function(file, tmpdir, callback) {
 	var buf = file.asNodeBuffer();
         var oldfile = tmpdir + '/snapconvert_' + file.name;
 	var newfile = oldfile + '.new.wav';
-	try{
-            fs.unlinkSync(oldfile);
-	} catch(err) {}
-	try{
-            fs.unlinkSync(newfile);
-	} catch(err) {}
+	delfile(oldfile);
+        delfile(newfile);
 	fs.writeFileSync(oldfile, buf);
         ffmpeg.exec(
           ['-i', oldfile, '-acodec',  'pcm_s16le', newfile ],  
@@ -683,6 +691,10 @@ var ffmpeg = require("ffmpeg-node");
 	    if (key.endsWith(".wav")) {	
 		should_process +=1;
 	    }
+	}
+	if (should_process == 0) {
+	    callback();
+	    return;
 	}
 	for (var key in zip.files) {
 	    var f = zip.files[key];
@@ -716,7 +728,6 @@ var ffmpeg = require("ffmpeg-node");
         result.property("version", "1");
         result.content.push(new XMLData("notes", null, "Converted by Snapin8r."));
         result.content.push(new XMLData("thumbnail", null, ""));
-
         // global variables (special case)
         var varks = new XMLData("variables");
         if (json_data["variables"] || json_data["lists"]) {
