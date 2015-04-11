@@ -11,6 +11,7 @@ if (typeof String.prototype.endsWith !== 'function') {
 
 var fs = require("fs");
 var ffmpeg = require("ffmpeg-node");
+var path = require("path");
 
 ! function () {
     // Block libraries
@@ -723,7 +724,7 @@ var ffmpeg = require("ffmpeg-node");
             return;
         }
         var result = new XMLData("project");
-        result.property("name", name||"Untitled");
+        result.property("name", path.basename(name,".sb2")||"Untitled");
         result.property("app", "Snapin8r");
         result.property("version", "1");
         result.content.push(new XMLData("notes", null, "Converted by Snapin8r."));
